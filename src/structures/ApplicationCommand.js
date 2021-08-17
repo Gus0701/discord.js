@@ -1,8 +1,8 @@
 'use strict';
 
 const Base = require('./Base');
-const { Error } = require('../errors');
-const { ApplicationCommandOptionTypes } = require('../util/Constants');
+const ApplicationCommandPermissionsManager = require('../managers/ApplicationCommandPermissionsManager');
+const { ApplicationCommandOptionTypes, ApplicationCommandTypes } = require('../util/Constants');
 const SnowflakeUtil = require('../util/SnowflakeUtil');
 
 /**
@@ -10,20 +10,45 @@ const SnowflakeUtil = require('../util/SnowflakeUtil');
  * @extends {Base}
  */
 class ApplicationCommand extends Base {
-  constructor(client, data, guild) {
+  constructor(client, data, guild, guildId) {
     super(client);
 
     /**
-     * The ID of this command
+     * The command's id
      * @type {Snowflake}
      */
     this.id = data.id;
+
+    /**
+     * The parent application's id
+     * @type {Snowflake}
+     */
+    this.applicationId = data.application_id;
 
     /**
      * The guild this command is part of
      * @type {?Guild}
      */
     this.guild = guild ?? null;
+
+    /**
+     * The guild's id this command is part of, this may be non-null when `guild` is `null` if the command
+     * was fetched from the `ApplicationCommandManager`
+     * @type {?Snowflake}
+     */
+    this.guildId = guild?.id ?? guildId ?? null;
+
+    /**
+     * The manager for permissions of this command on its guild or arbitrary guilds when the command is global
+     * @type {ApplicationCommandPermissionsManager}
+     */
+    this.permissions = new ApplicationCommandPermissionsManager(this);
+
+    /**
+     * The type of this application command
+     * @type {ApplicationCommandType}
+     */
+    this.type = ApplicationCommandTypes[data.type];
 
     this._patch(data);
   }
@@ -86,6 +111,7 @@ class ApplicationCommand extends Base {
    * @typedef {Object} ApplicationCommandData
    * @property {string} name The name of the command
    * @property {string} description The description of the command
+   * @property {ApplicationCommandType} [type] The type of the command
    * @property {ApplicationCommandOptionData[]} [options] Options for the command
    * @property {boolean} [defaultPermission] Whether the command is enabled by default when the app is added to a guild
    */
@@ -114,7 +140,7 @@ class ApplicationCommand extends Base {
    *   .catch(console.error);
    */
   edit(data) {
-    return this.manager.edit(this, data);
+    return this.manager.edit(this, data, this.guildId);
   }
 
   /**
@@ -127,60 +153,7 @@ class ApplicationCommand extends Base {
    *   .catch(console.error);
    */
   delete() {
-    return this.manager.delete(this);
-  }
-
-  /**
-   * Data for setting the permissions of an application command.
-   * @typedef {object} ApplicationCommandPermissionData
-   * @property {Snowflake} id The ID of the role or user
-   * @property {ApplicationCommandPermissionType|number} type Whether this permission if for a role or a user
-   * @property {boolean} permission Whether the role or user has the permission to use this command
-   */
-
-  /**
-   * The object returned when fetching permissions for an application command.
-   * @typedef {object} ApplicationCommandPermissions
-   * @property {Snowflake} id The ID of the role or user
-   * @property {ApplicationCommandPermissionType} type Whether this permission if for a role or a user
-   * @property {boolean} permission Whether the role or user has the permission to use this command
-   */
-
-  /**
-   * Fetches the permissions for this command.
-   * <warn>This is only available for guild application commands.</warn>
-   * @returns {Promise<ApplicationCommandPermissions[]>}
-   * @example
-   * // Fetch permissions for this command
-   * command.fetchPermissions()
-   *   .then(perms => console.log(`Fetched permissions for ${perms.length} users`))
-   *   .catch(console.error);
-   */
-  fetchPermissions() {
-    if (!this.guild) throw new Error('GLOBAL_COMMAND_PERMISSIONS');
-    return this.manager.fetchPermissions(this);
-  }
-
-  /**
-   * Sets the permissions for this command.
-   * <warn>This is only available for guild application commands.</warn>
-   * @param {ApplicationCommandPermissionData[]} permissions The new permissions for the command
-   * @returns {Promise<ApplicationCommandPermissions[]>}
-   * @example
-   * // Set the permissions for this command
-   * command.setPermissions([
-   *   {
-   *     id: '876543210987654321',
-   *     type: 'USER',
-   *     permission: false,
-   *   },
-   * ])
-   *   .then(console.log)
-   *   .catch(console.error);
-   */
-  setPermissions(permissions) {
-    if (!this.guild) throw new Error('GLOBAL_COMMAND_PERMISSIONS');
-    return this.manager.setPermissions(this, permissions);
+    return this.manager.delete(this, this.guildId);
   }
 
   /**
@@ -205,15 +178,17 @@ class ApplicationCommand extends Base {
    * Transforms an {@link ApplicationCommandOptionData} object into something that can be used with the API.
    * @param {ApplicationCommandOptionData} option The option to transform
    * @param {boolean} [received] Whether this option has been received from Discord
-   * @returns {Object}
+   * @returns {APIApplicationCommandOption}
    * @private
    */
   static transformOption(option, received) {
+    const stringType = typeof option.type === 'string' ? option.type : ApplicationCommandOptionTypes[option.type];
     return {
       type: typeof option.type === 'number' && !received ? option.type : ApplicationCommandOptionTypes[option.type],
       name: option.name,
       description: option.description,
-      required: option.required,
+      required:
+        option.required ?? (stringType === 'SUB_COMMAND' || stringType === 'SUB_COMMAND_GROUP' ? undefined : false),
       choices: option.choices,
       options: option.options?.map(o => this.transformOption(o, received)),
     };
@@ -221,3 +196,14 @@ class ApplicationCommand extends Base {
 }
 
 module.exports = ApplicationCommand;
+
+/* eslint-disable max-len */
+/**
+ * @external APIApplicationCommand
+ * @see {@link https://discord.com/developers/docs/interactions/application-commands#application-command-object-application-command-structure}
+ */
+
+/**
+ * @external APIApplicationCommandOption
+ * @see {@link https://discord.com/developers/docs/interactions/application-commands#application-command-object-application-command-option-structure}
+ */

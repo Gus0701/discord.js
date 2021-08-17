@@ -1,27 +1,25 @@
 'use strict';
 
+const { Collection } = require('@discordjs/collection');
 const APIRequest = require('./APIRequest');
 const routeBuilder = require('./APIRouter');
 const RequestHandler = require('./RequestHandler');
 const { Error } = require('../errors');
-const Collection = require('../util/Collection');
 const { Endpoints } = require('../util/Constants');
 
 class RESTManager {
-  constructor(client, tokenPrefix = 'Bot') {
+  constructor(client) {
     this.client = client;
     this.handlers = new Collection();
-    this.tokenPrefix = tokenPrefix;
     this.versioned = true;
     this.globalLimit = client.options.restGlobalRateLimit > 0 ? client.options.restGlobalRateLimit : Infinity;
     this.globalRemaining = this.globalLimit;
     this.globalReset = null;
     this.globalDelay = null;
     if (client.options.restSweepInterval > 0) {
-      const interval = client.setInterval(() => {
+      this.sweepInterval = setInterval(() => {
         this.handlers.sweep(handler => handler._inactive);
-      }, client.options.restSweepInterval * 1000);
-      interval.unref();
+      }, client.options.restSweepInterval * 1000).unref();
     }
   }
 
@@ -30,8 +28,8 @@ class RESTManager {
   }
 
   getAuth() {
-    const token = this.client.token || this.client.accessToken;
-    if (token) return `${this.tokenPrefix} ${token}`;
+    const token = this.client.token ?? this.client.accessToken;
+    if (token) return `Bot ${token}`;
     throw new Error('TOKEN_MISSING');
   }
 
